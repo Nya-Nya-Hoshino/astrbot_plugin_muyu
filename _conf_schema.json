@@ -1,0 +1,7 @@
+{
+    "muyu_enabled": {
+        "description": "启用赛博木鱼",
+        "type": "bool",
+        "default": true
+    }
+}

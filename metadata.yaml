@@ -1,0 +1,6 @@
+name: muyu
+desc: 赛博木鱼，敲一下功德+1，含排行榜。群聊解压神器。
+help: 在群里发送 /敲木鱼 即可积攒功德，支持排行榜和里程碑成就。
+version: v1.0.0
+author: Nya-Nya-Hoshino
+repo: https://github.com/Nya-Nya-Hoshino/astrbot_plugin_muyu
