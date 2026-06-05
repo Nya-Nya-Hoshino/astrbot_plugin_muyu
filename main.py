@@ -1,7 +1,9 @@
 import random
+import asyncio
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
+from astrbot.api.platform import PlatformAdapterType
 
 
 WOOD_SOUNDS = [
@@ -35,12 +37,26 @@ MILESTONE_LINES = {
     10000: "万德归一！你已超越众生于三界之外！",
 }
 
+RECALL_SNIFF_LINES = [
+    "嗅到了撤回的气息... {name} 刚刚撤回了：\n{content}",
+    "撤回也没用！我看到了！{name}：\n{content}",
+    "别想逃～ {name} 刚才说：\n{content}",
+    "已截图（不是）。{name} 撤回了：\n{content}",
+    "撤回记录仪启动！{name}：\n{content}",
+]
+
 
 class Main(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
         self.config = config or {}
-        logger.info("[muyu] 赛博木鱼已就位，咚——")
+        self._last_messages: dict[str, dict] = {}
+        self.muyu_enabled = self.config.get("muyu_enabled", True)
+        self.recall_sniff_enabled = self.config.get("recall_sniff_enabled", True)
+        self._recall_hooked = False
+        logger.info("[muyu] 赛博木鱼 + 撤回嗅探已就位，咚——")
+
+    # ==================== 木鱼 ====================
 
     async def _get_merit(self, group_id: str, user_id: str) -> int:
         key = f"merit_{group_id}_{user_id}"
@@ -67,6 +83,8 @@ class Main(Star):
     @filter.command("敲木鱼")
     async def muyu(self, event: AstrMessageEvent):
         """敲一下赛博木鱼，功德 +1"""
+        if not self.muyu_enabled:
+            return
         group_id = event.get_group_id() or "private"
         user_id = event.get_sender_id()
         user_name = event.get_sender_name()
@@ -118,3 +136,65 @@ class Main(Star):
             yield event.plain_result(f"{user_name} 今日尚未敲过木鱼，善哉～")
         else:
             yield event.plain_result(f"{user_name} 今日功德: {count}")
+
+    # ==================== 撤回嗅探 ====================
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def _cache_message(self, event: AstrMessageEvent):
+        """缓存每条群消息，供撤回时复读"""
+        if not self.recall_sniff_enabled:
+            return
+        msg_id = event.message_obj.message_id
+        user_name = event.get_sender_name()
+        content = event.message_str.strip()
+        if msg_id and content:
+            self._last_messages[msg_id] = {
+                "name": user_name,
+                "content": content,
+            }
+            # 只保留最近 200 条
+            if len(self._last_messages) > 200:
+                oldest = next(iter(self._last_messages))
+                del self._last_messages[oldest]
+
+    @filter.on_astrbot_loaded()
+    async def _hook_recall(self):
+        """在 AstrBot 加载完成后，向 aiocqhttp 平台注册撤回监听"""
+        if self._recall_hooked or not self.recall_sniff_enabled:
+            return
+        self._recall_hooked = True
+
+        platforms = self.context.platform_manager.get_insts()
+        for plat in platforms:
+            meta = plat.meta()
+            if meta.name != "aiocqhttp":
+                continue
+
+            try:
+                client = plat.get_client()
+            except Exception:
+                continue
+
+            @client.on_notice("group_recall")
+            async def _on_group_recall(event):
+                msg_id = str(event.get("message_id", ""))
+                group_id = str(event.get("group_id", ""))
+                user_id = str(event.get("user_id", ""))
+
+                if msg_id not in self._last_messages:
+                    return
+
+                cached = self._last_messages.pop(msg_id)
+                name = cached["name"]
+                content = cached["content"]
+                line = random.choice(RECALL_SNIFF_LINES).format(name=name, content=content)
+
+                try:
+                    await client.api.send_group_msg(
+                        group_id=group_id,
+                        message=line,
+                    )
+                except Exception as e:
+                    logger.error(f"[muyu] 撤回复读失败: {e}")
+
+            logger.info(f"[muyu] 撤回嗅探已绑定到 {meta.name}")

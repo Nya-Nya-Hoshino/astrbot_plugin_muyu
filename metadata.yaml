@@ -1,6 +1,6 @@
 name: muyu
-desc: 赛博木鱼，敲一下功德+1，含排行榜。群聊解压神器。
-help: 在群里发送 /敲木鱼 即可积攒功德，支持排行榜和里程碑成就。
+desc: 赛博木鱼 + 撤回嗅探，敲功德攒排行，截撤回当复读机。群聊快乐源泉。
+help: 发送 /敲木鱼 积攒功德，/功德排行榜 查看排名，/今日功德 查询自己。自动嗅探群聊撤回消息并复读。
 version: v1.0.0
 author: Nya-Nya-Hoshino
 repo: https://github.com/Nya-Nya-Hoshino/astrbot_plugin_muyu

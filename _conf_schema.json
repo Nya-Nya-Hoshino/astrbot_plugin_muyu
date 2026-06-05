@@ -3,5 +3,10 @@
         "description": "启用赛博木鱼",
         "type": "bool",
         "default": true
+    },
+    "recall_sniff_enabled": {
+        "description": "启用撤回嗅探",
+        "type": "bool",
+        "default": true
     }
 }
