@@ -51,7 +51,6 @@ class Main(Star):
         self._last_messages: dict[str, dict] = {}
         self.muyu_enabled = self.config.get("muyu_enabled", True)
         self.recall_sniff_enabled = self.config.get("recall_sniff_enabled", True)
-        self._recall_hooked = False
         logger.info("[muyu] 赛博木鱼 + 撤回嗅探已就位，咚——")
 
     # ==================== 木鱼 ====================
@@ -138,10 +137,28 @@ class Main(Star):
     # ==================== 撤回嗅探 ====================
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
-    async def _cache_message(self, event: AstrMessageEvent):
-        """缓存每条群消息供撤回嗅探（透明观察者）"""
+    async def _on_group_event(self, event: AstrMessageEvent):
+        """监听所有群消息事件（含撤回 notice），缓存普通消息 + 嗅探撤回"""
         if not self.recall_sniff_enabled:
             return
+
+        raw = getattr(event.message_obj, "raw_message", None) or {}
+        post_type = raw.get("post_type", "") if isinstance(raw, dict) else ""
+
+        if post_type == "notice" and raw.get("notice_type") == "group_recall":
+            # 这是撤回事件
+            recalled_msg_id = str(raw.get("message_id", ""))
+            logger.info(f"[muyu] 检测到撤回: msg_id={recalled_msg_id}")
+
+            if recalled_msg_id in self._last_messages:
+                cached = self._last_messages.pop(recalled_msg_id)
+                line = random.choice(RECALL_SNIFF_LINES).format(
+                    name=cached["name"], content=cached["content"]
+                )
+                yield event.plain_result(line)
+            return
+
+        # 普通消息：缓存起来
         msg_id = event.message_obj.message_id
         user_name = event.get_sender_name()
         content = event.message_str.strip()
@@ -150,39 +167,3 @@ class Main(Star):
             if len(self._last_messages) > 200:
                 oldest = next(iter(self._last_messages))
                 del self._last_messages[oldest]
-
-    @filter.on_platform_loaded()
-    async def _hook_recall(self, event=None):
-        """当 aiocqhttp 平台加载时注册撤回监听"""
-        if not self.recall_sniff_enabled or self._recall_hooked:
-            return
-
-        platforms = self.context.platform_manager.get_insts()
-        for plat in platforms:
-            meta = plat.meta()
-            if meta.name != "aiocqhttp":
-                continue
-            try:
-                client = plat.get_client()
-            except Exception as e:
-                logger.warning(f"[muyu] 获取 aiocqhttp client 失败: {e}")
-                continue
-
-            @client.on_notice("group_recall")
-            async def _on_group_recall(notice_event):
-                msg_id = str(notice_event.get("message_id", ""))
-                group_id = str(notice_event.get("group_id", ""))
-                if msg_id not in self._last_messages:
-                    return
-                cached = self._last_messages.pop(msg_id)
-                line = random.choice(RECALL_SNIFF_LINES).format(
-                    name=cached["name"], content=cached["content"]
-                )
-                try:
-                    await client.api.send_group_msg(group_id=group_id, message=line)
-                except Exception as e:
-                    logger.error(f"[muyu] 撤回复读失败: {e}")
-
-            self._recall_hooked = True
-            logger.info(f"[muyu] 撤回嗅探已绑定到 {meta.name}")
-            break
