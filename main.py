@@ -56,26 +56,26 @@ class Main(Star):
 
     # ==================== 木鱼 ====================
 
-    async def _get_merit(self, group_id: str, user_id: str) -> int:
-        key = f"merit_{group_id}_{user_id}"
-        val = await self.plugin_kv_store.get(key)
-        return int(val) if val else 0
+    async def _get_merits(self) -> dict:
+        return await self.get_kv_data("merits", {})
 
-    async def _set_merit(self, group_id: str, user_id: str, count: int):
-        key = f"merit_{group_id}_{user_id}"
-        await self.plugin_kv_store.set(key, str(count))
+    async def _save_merits(self, data: dict):
+        await self.put_kv_data("merits", data)
+
+    async def _get_group_merits(self, group_id: str) -> dict:
+        merits = await self._get_merits()
+        return merits.get(group_id, {})
+
+    async def _add_merit(self, group_id: str, user_id: str):
+        merits = await self._get_merits()
+        group = merits.setdefault(group_id, {})
+        group[user_id] = group.get(user_id, 0) + 1
+        await self._save_merits(merits)
+        return group[user_id]
 
     async def _get_leaderboard(self, group_id: str):
-        prefix = f"merit_{group_id}_"
-        all_keys = await self.plugin_kv_store.keys()
-        board = []
-        for k in all_keys:
-            if k.startswith(prefix):
-                uid = k[len(prefix):]
-                val = await self.plugin_kv_store.get(k)
-                if val:
-                    board.append((uid, int(val)))
-        board.sort(key=lambda x: x[1], reverse=True)
+        group = await self._get_group_merits(group_id)
+        board = sorted(group.items(), key=lambda x: x[1], reverse=True)
         return board[:10]
 
     @filter.command("敲木鱼")
@@ -87,9 +87,7 @@ class Main(Star):
         user_id = event.get_sender_id()
         user_name = event.get_sender_name()
 
-        count = await self._get_merit(group_id, user_id)
-        count += 1
-        await self._set_merit(group_id, user_id, count)
+        count = await self._add_merit(group_id, user_id)
 
         sound = random.choice(WOOD_SOUNDS)
         line = random.choice(MERIT_LINES)
@@ -128,7 +126,8 @@ class Main(Star):
         group_id = event.get_group_id() or "private"
         user_id = event.get_sender_id()
         user_name = event.get_sender_name()
-        count = await self._get_merit(group_id, user_id)
+        group = await self._get_group_merits(group_id)
+        count = group.get(user_id, 0)
 
         if count == 0:
             yield event.plain_result(f"{user_name} 今日尚未敲过木鱼，善哉～")
